@@ -13,15 +13,26 @@ ip=$(grep -E '^PUBLIC_IP=' .env | cut -d= -f2)
 [[ -n $ip ]] || { echo "PUBLIC_IP is empty in .env -- run setup-host.sh first." >&2; exit 1; }
 
 # IP address certificates need certbot >= 5.4 (--ip-address with webroot).
+# Amazon Linux has no snap and its dnf certbot is too old, so use the official pip install.
+install_hint() {
+  cat >&2 <<'HINT'
+Install certbot >= 5.4 (Amazon Linux, official pip method). Keeps existing certs in /etc/letsencrypt:
+  sudo dnf remove -y certbot python3-certbot-nginx
+  sudo python3 -m venv /opt/certbot
+  sudo /opt/certbot/bin/pip install --upgrade pip certbot certbot-nginx
+  sudo ln -sf /opt/certbot/bin/certbot /usr/bin/certbot
+(This script installs a twice-daily renewal timer itself.)
+HINT
+}
 if ! command -v certbot >/dev/null; then
-  echo "certbot not found. Install it with: sudo snap install --classic certbot && sudo ln -sf /snap/bin/certbot /usr/bin/certbot" >&2
+  echo "certbot not found." >&2
+  install_hint
   exit 1
 fi
 ver=$(certbot --version 2>&1 | awk '{print $2}')
 if [[ $(printf '%s\n' 5.4 "$ver" | sort -V | head -1) != 5.4 ]]; then
-  echo "certbot $ver is too old (need >= 5.4). Replace the apt version with the snap one:" >&2
-  echo "  sudo apt remove certbot && sudo snap install --classic certbot && sudo ln -sf /snap/bin/certbot /usr/bin/certbot" >&2
-  echo "Existing certificates in /etc/letsencrypt are kept and keep renewing." >&2
+  echo "certbot $ver is too old (need >= 5.4)." >&2
+  install_hint
   exit 1
 fi
 
@@ -34,7 +45,8 @@ echo ok > "$webroot/.well-known/acme-challenge/selftest"
 if [[ $(curl -s -m 5 "http://${ip}/.well-known/acme-challenge/selftest" || true) != ok ]]; then
   rm -f "$webroot/.well-known/acme-challenge/selftest"
   echo "http://${ip}/.well-known/acme-challenge/ is not served from ${webroot}." >&2
-  echo "Add nginx/existing-nginx-acme-snippet.conf to your existing Nginx, reload it, and make sure port 80 is open." >&2
+  echo "Install nginx/existing-nginx-acme-snippet.conf as /etc/nginx/conf.d/sonarqube-acme.conf (PUBLIC_IP filled in)," >&2
+  echo "run 'sudo nginx -t && sudo systemctl reload nginx', and make sure port 80 is open in the Security Group." >&2
   exit 1
 fi
 rm -f "$webroot/.well-known/acme-challenge/selftest"
@@ -48,5 +60,32 @@ certbot certonly "$@" \
   --ip-address "$ip" \
   --deploy-hook "docker exec sonarqube-nginx nginx -s reload || true"
 
+# IP certs last only 6 days, so renew twice a day with a systemd timer (Amazon Linux 2023 has no
+# cron by default, and removing dnf's certbot removes its timer). Renews every cert in
+# /etc/letsencrypt, including the existing domain cert -- running alongside another renewer is harmless.
+cat > /etc/systemd/system/certbot-renew-ip.service <<'UNIT'
+[Unit]
+Description=Renew Let's Encrypt certificates (incl. SonarQube IP cert)
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/certbot renew -q
+UNIT
+cat > /etc/systemd/system/certbot-renew-ip.timer <<'UNIT'
+[Unit]
+Description=Run certbot renew twice a day
+
+[Timer]
+OnCalendar=*-*-* 00,12:00:00
+RandomizedDelaySec=1h
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+UNIT
+systemctl daemon-reload
+systemctl enable --now certbot-renew-ip.timer
+
 echo "Certificate: /etc/letsencrypt/live/${ip}/fullchain.pem"
+echo "Renewal timer: systemctl list-timers certbot-renew-ip.timer"
 echo "Test renewal with: sudo certbot renew --dry-run"

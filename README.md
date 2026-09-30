@@ -13,7 +13,7 @@ browser -> https :9000 -> sonarqube-nginx (Let's Encrypt IP cert) (Host == PUBLI
 
 ## Requirements
 - Docker + Docker Compose plugin on the EC2 instance
-- certbot >= 5.4 (`sudo snap install --classic certbot`) -- needed for IP address certificates
+- certbot >= 5.4 -- needed for IP address certificates (on Amazon Linux install via pip; `get-cert.sh` prints the commands)
 - Port 80 open to the internet (Let's Encrypt validates the IP over HTTP; your existing project likely has this already)
 - ~2-3 GB free RAM for SonarQube (t3.medium or larger recommended when sharing the host)
 
@@ -31,12 +31,16 @@ Let's Encrypt validates the IP via `http://<EC2_PUBLIC_IP>/.well-known/acme-chal
 owned by your existing Nginx. Add the block from `nginx/existing-nginx-acme-snippet.conf` to that
 Nginx (it only matches the bare IP, so your domain is unaffected), then:
 ```bash
+IP=$(grep '^PUBLIC_IP=' .env | cut -d= -f2)
+sed "s/<EC2_PUBLIC_IP>/$IP/" nginx/existing-nginx-acme-snippet.conf \
+  | sudo tee /etc/nginx/conf.d/sonarqube-acme.conf >/dev/null
 sudo nginx -t && sudo systemctl reload nginx   # existing Nginx
 sudo ./get-cert.sh --staging                   # optional test against LE staging
 sudo ./get-cert.sh                             # real certificate
 sudo certbot renew --dry-run                   # confirm auto-renewal works
 ```
-IP certificates are only valid for **6 days**. certbot's timer renews them automatically and the
+IP certificates are only valid for **6 days**. `get-cert.sh` installs a twice-daily systemd timer
+(`certbot-renew-ip.timer`) that renews them automatically, and the
 deploy hook reloads the `sonarqube-nginx` container, so nothing manual is needed once it works.
 
 ### Start SonarQube
