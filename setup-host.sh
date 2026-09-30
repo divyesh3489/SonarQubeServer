@@ -10,12 +10,14 @@ fi
 cd "$(dirname "$0")"
 
 # SonarQube's embedded Elasticsearch refuses to start without these kernel limits.
-cat > /etc/sysctl.d/99-sonarqube.conf <<'EOF'
-vm.max_map_count=524288
-fs.file-max=131072
-EOF
-sysctl --system >/dev/null
-echo "Kernel settings applied: vm.max_map_count=$(sysctl -n vm.max_map_count), fs.file-max=$(sysctl -n fs.file-max)"
+# Only ever raise them: the host default is usually far higher and the existing project shares it.
+conf=/etc/sysctl.d/99-sonarqube.conf
+: > "$conf"
+if (( $(sysctl -n vm.max_map_count) < 524288 )); then echo "vm.max_map_count=524288" >> "$conf"; fi
+if (( $(sysctl -n fs.file-max) < 131072 )); then echo "fs.file-max=131072" >> "$conf"; fi
+# Load only this file; `sysctl --system` re-applies every distro file and prints unrelated errors.
+sysctl -q -p "$conf"
+echo "Kernel settings: vm.max_map_count=$(sysctl -n vm.max_map_count), fs.file-max=$(sysctl -n fs.file-max)"
 
 if [[ ! -f .env ]]; then
   cp .env.example .env
@@ -47,7 +49,10 @@ fi
 echo "Port ${port} is free."
 
 # Measured with the existing project already running, so this is what is left for SonarQube.
+# Swap is deliberately not counted: Elasticsearch and the JVMs become unusably slow when swapped,
+# and they would push the existing project into swap too.
 mem_mb=$(awk '/MemAvailable/ {print int($2/1024)}' /proc/meminfo)
 if (( mem_mb < 3000 )); then
-  echo "WARNING: only ${mem_mb} MB RAM available. SonarQube needs ~2-3 GB on top of your existing project; resize the instance or add swap." >&2
+  echo "WARNING: only ${mem_mb} MB RAM available (swap not counted). SonarQube needs ~2-3 GB of real RAM" >&2
+  echo "on top of your existing project; resize the instance (8 GB recommended) or use a separate one." >&2
 fi
