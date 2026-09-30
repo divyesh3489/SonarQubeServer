@@ -1,15 +1,27 @@
-# Only requests addressed to the EC2 public IP are proxied to SonarQube.
+# Only HTTPS requests addressed to the EC2 public IP are proxied to SonarQube.
 # Anything else (e.g. the existing project's domain pointed at this host) is dropped.
 
+# Let's Encrypt IP certificate issued by get-cert.sh (6-day "shortlived" profile, renewed by certbot).
+# Set at http level: browsers send no SNI for IP addresses, so every server block needs it.
+ssl_certificate     /etc/letsencrypt/live/${PUBLIC_IP}/fullchain.pem;
+ssl_certificate_key /etc/letsencrypt/live/${PUBLIC_IP}/privkey.pem;
+ssl_protocols       TLSv1.2 TLSv1.3;
+ssl_session_cache   shared:SSL:10m;
+
 server {
-    listen 80 default_server;
+    listen 443 ssl default_server;
     server_name _;
     return 444;
 }
 
 server {
-    listen 80;
+    listen 443 ssl;
     server_name ${PUBLIC_IP};
+
+    # Plain http://<ip>:<port> on this TLS port -> redirect to https on the same port.
+    error_page 497 =301 https://$http_host$request_uri;
+
+    add_header Strict-Transport-Security "max-age=31536000" always;
 
     # Scanner analysis reports can be large.
     client_max_body_size 100m;
@@ -19,7 +31,7 @@ server {
         proxy_set_header Host $http_host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Proto https;
         proxy_read_timeout 300s;
     }
 }

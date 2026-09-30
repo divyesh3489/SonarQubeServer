@@ -1,3 +1,6 @@
+# Fixed project name so volumes/containers never mix with the existing 'hexagare' stack.
+name: sonarqube
+
 services:
   sonarqube:
     image: sonarqube:community
@@ -33,12 +36,14 @@ services:
       - sonarqube
     environment:
       PUBLIC_IP: ${PUBLIC_IP}
-    # Reached at http://<EC2_PUBLIC_IP>:<SONAR_PORT>. Requests using any other
+    # Reached at https://<EC2_PUBLIC_IP>:<SONAR_PORT>. Requests using any other
     # Host (such as the existing project's domain) are rejected.
     ports:
-      - "${SONAR_PORT}:80"
+      - "${SONAR_PORT}:443"
     volumes:
       - ./nginx/sonarqube.conf.template:/etc/nginx/templates/default.conf.template:ro
+      # Whole dir is mounted because live/ contains symlinks into archive/.
+      - /etc/letsencrypt:/etc/letsencrypt:ro
     networks:
       - sonarnet
 

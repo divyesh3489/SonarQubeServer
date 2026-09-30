@@ -46,7 +46,8 @@ if ss -ltn "sport = :${port}" | grep -q LISTEN; then
 fi
 echo "Port ${port} is free."
 
-mem_mb=$(awk '/MemTotal/ {print int($2/1024)}' /proc/meminfo)
-if (( mem_mb < 3500 )); then
-  echo "WARNING: only ${mem_mb} MB RAM. SonarQube needs ~2-3 GB on top of your existing project; use t3.medium or larger, or add swap." >&2
+# Measured with the existing project already running, so this is what is left for SonarQube.
+mem_mb=$(awk '/MemAvailable/ {print int($2/1024)}' /proc/meminfo)
+if (( mem_mb < 3000 )); then
+  echo "WARNING: only ${mem_mb} MB RAM available. SonarQube needs ~2-3 GB on top of your existing project; resize the instance or add swap." >&2
 fi
