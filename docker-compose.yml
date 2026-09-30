@@ -42,8 +42,8 @@ services:
       - "${SONAR_PORT}:443"
     volumes:
       - ./nginx/sonarqube.conf.template:/etc/nginx/templates/default.conf.template:ro
-      # Whole dir is mounted because live/ contains symlinks into archive/.
-      - /etc/letsencrypt:/etc/letsencrypt:ro
+      # SonarQube-only certbot dir (see certbot.env); whole dir because live/ symlinks into archive/.
+      - /etc/letsencrypt-sonarqube:/etc/letsencrypt:ro
     networks:
       - sonarnet
 
